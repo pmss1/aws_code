@@ -1,0 +1,40 @@
+{
+  "generator-jhipster": {
+    "promptValues": {
+      "packageName": "com.mycompany.squarer",
+      "nativeLanguage": "en"
+    },
+    "jhipsterVersion": "5.8.1",
+    "applicationType": "microservice",
+    "baseName": "squarer",
+    "packageName": "com.mycompany.squarer",
+    "packageFolder": "com/mycompany/squarer",
+    "serverPort": "8082",
+    "authenticationType": "jwt",
+    "cacheProvider": "no",
+    "enableHibernateCache": false,
+    "websocket": false,
+    "databaseType": "no",
+    "devDatabaseType": "no",
+    "prodDatabaseType": "no",
+    "searchEngine": false,
+    "messageBroker": false,
+    "serviceDiscoveryType": false,
+    "buildTool": "gradle",
+    "enableSwaggerCodegen": false,
+    "jwtSecretKey": "Yjk3MDY2YjA1ZTdlNjBkZWUyODBjYzA1NzdiYjY4Mzc0NWVjOTI3YjVmNWQwMjgyYjY3ZGQzZTQ2OTZkM2I5ZmEwMzgzYjNhNmI4NmYxOWVlMDQyNWRkMWVkZTBhMWIxMzZmYmI5ZjFjODUyNmI0OWQ5OTEwYjczM2UwM2M1ZDM=",
+    "testFrameworks": [],
+    "jhiPrefix": "jhi",
+    "entitySuffix": "",
+    "dtoSuffix": "DTO",
+    "otherModules": [],
+    "enableTranslation": true,
+    "clientPackageManager": "npm",
+    "nativeLanguage": "en",
+    "languages": [
+      "en"
+    ],
+    "skipClient": true,
+    "skipUserManagement": true
+  }
+}
