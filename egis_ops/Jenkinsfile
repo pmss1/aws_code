@@ -1,0 +1,173 @@
+pipeline {
+  agent {
+    kubernetes {
+      cloud 'openshift'
+      label "mp-${UUID.randomUUID().toString()}"
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  securityContext:
+    runAsUser: 0
+  containers:
+  - name: helmsman
+    image: docker-registry.default.svc:5000/labs-ci-cd/helmsman-oc:v1.7.3-helm-v2.11.0
+    command: ['cat']
+    tty: true
+  - name: java-build-tools
+    image: docker-registry.default.svc:5000/labs-ci-cd/java-build-tools:edge
+    command: ['cat']
+    tty: true
+    volumeMounts:
+    - name: dockersock
+      mountPath: /var/run/docker.sock
+  volumes:
+  - name: dockersock
+    hostPath:
+      path: /var/run/docker.sock
+"""
+    }
+  }
+  environment {
+    CONTAINER_NAME = "squarer"
+    DOCKER_REPO = "docker-registry.default.svc:5000/labs-ci-cd"
+    AWS_DEFAULT_REGION = "us-east-1"
+    GIT_COMMIT = sh (script: "git log -n 1 --pretty=format:'%H'", returnStdout: true)
+  }
+  options {
+    timeout(time: 1, unit: 'HOURS')
+    buildDiscarder(logRotator(numToKeepStr: '5'))
+    timestamps()
+  }
+  stages {
+    stage('Validate, Build, Test') {
+      steps {
+        container('java-build-tools') {
+          withSonarQubeEnv('sonar') {
+            // Ideally this should be broken up into 4 stages (Validate, Build, Test, Build Docker),
+            // but putting them all in the same gradle command ensures that there aren't any tasks that get run twice.
+            sh '''
+              ./gradlew -Pprod clean test bootWar jibDockerBuild sonar \
+              -Dsonar.host.url=$SONAR_HOST_URL \
+              -Dsonar.login=$SONAR_AUTH_TOKEN \
+              -Dsonar.branch=$GIT_BRANCH \
+              --no-daemon
+            '''
+          }
+        }
+      }
+      post {
+        always {
+          junit 'build/**/TEST-*.xml'
+        }
+      }
+    }
+    stage("SonarQube Quality Gate") {
+     steps {
+       retry(60) {
+         script {
+           try {
+             timeout(time: 10, unit: 'SECONDS') {
+               def qg = waitForQualityGate()
+               if (qg.status != 'OK' && qg.status != 'IN_PROGRESS' && qg.status != 'WARN') {
+                 error "Pipeline aborted due to quality gate failure: ${qg.status}"
+               }
+             }
+           } catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException err) {
+             error "Timeout. ${err}"
+           }
+         }
+       }
+     }
+    }
+    stage('Login Docker') {
+      when {
+        anyOf {
+          branch 'release'
+          branch 'master'
+        }
+      }
+      steps {
+        container('java-build-tools') {
+          withCredentials([string(credentialsId: '1a12dfa4-7fc5-47a7-aa17-cc56572a41c7', variable: 'JENKINS_TOKEN')]) {
+            sh '''
+              docker login -u jenkins -p ${JENKINS_TOKEN} docker-registry.default.svc:5000
+            '''
+          }
+        }
+      }
+    }
+    stage('Push Revision') {
+      when {
+        anyOf {
+          branch 'release'
+          branch 'master'
+        }
+      }
+      steps {
+        container('java-build-tools') {
+          sh '''
+            docker tag $CONTAINER_NAME:latest ${DOCKER_REPO}/${CONTAINER_NAME}:git-$(git rev-parse HEAD)
+            docker push ${DOCKER_REPO}/${CONTAINER_NAME}:git-$(git rev-parse HEAD)
+          '''
+        }
+      }
+    }
+    stage('Push Unstable') {
+      when {
+        anyOf {
+          branch 'release'
+        }
+      }
+      steps {
+        container('java-build-tools') {
+          sh '''
+            docker tag $CONTAINER_NAME:latest ${DOCKER_REPO}/${CONTAINER_NAME}:unstable
+            docker push ${DOCKER_REPO}/${CONTAINER_NAME}:unstable
+          '''
+        }
+      }
+    }
+    stage('Push Edge') {
+      when {
+        branch 'master'
+      }
+      steps {
+        container ('java-build-tools') {
+          sh '''
+            docker tag $CONTAINER_NAME:latest $DOCKER_REPO:edge
+            docker push $DOCKER_REPO:edge
+          '''
+        }
+      }
+    }
+    stage('Deploy') {
+      when {
+        anyOf {
+          branch 'release'
+          branch 'master'
+        }
+      }
+      steps {
+        container ('helmsman') {          
+          withCredentials([string(credentialsId: '1a12dfa4-7fc5-47a7-aa17-cc56572a41c7', variable: 'JENKINS_TOKEN')]) {
+            withCredentials([string(credentialsId: 'aldorisioj-github-token', variable: 'GITHUB_TOKEN')]) {
+              sh '''
+                git clone https://aldorisioj:${GITHUB_TOKEN}@github.com/ZolonTech/egis-techchallenge-ops
+                cd egis-techchallenge-ops
+                git pull origin ${BRANCH_NAME}
+                git checkout ${BRANCH_NAME}
+                sed -i "s/^squarer=.*$/squarer=git-${GIT_COMMIT}/" versions.properties
+                git config --global user.email "donotreply@zolontech.com"
+                git config --global user.name "EGIS BuildBot"
+                git add .
+                git commit -m "update squarer deployment tag"
+                git push
+              '''
+            }
+          }
+        }
+      }
+    }
+  }
+}
